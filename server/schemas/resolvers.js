@@ -27,8 +27,13 @@ const resolvers = {
 
   Mutation: {
     addUser: async (parent, { username, email, password }) => {
+      console.log(username)
+      console.log(email)
+      console.log(password)
       const user = await User.create({ username, email, password });
+      console.log(user)
       const token = signToken(user);
+      console.log(token)
       return { token, user };
     },
     login: async (parent, { email, password }) => {
@@ -60,7 +65,7 @@ const resolvers = {
         console.log(err);
         throw new AuthenticationError('Incorrect stuff');
       }
-}},
+},
 removeBook: async (parent, args, context) =>  {
   const updatedUser = await User.findOneAndUpdate(
     { _id: context.user._id },
@@ -72,4 +77,8 @@ removeBook: async (parent, args, context) =>  {
   }
   return (updatedUser);
 },
+},
+
 };
+
+module.exports = resolvers
