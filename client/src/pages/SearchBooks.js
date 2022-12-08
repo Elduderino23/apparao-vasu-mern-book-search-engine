@@ -67,6 +67,7 @@ const [saveBook] = useMutation(SAVE_BOOK)
 
     try {
       // const response = await saveBook(bookToSave, token);
+      console.log(bookToSave)
 const response = await saveBook({
   variables: {
     "input": {
