@@ -1,269 +1,817 @@
-# 21 MERN: Book Search Engine
+# MERN Book Search Engine
 
-## Your Task
-
-Your assignment this week is emblematic of the fact that most modern websites are driven by two things: data and user demands. This shouldn't come as a surprise, as the ability to personalize user data is the cornerstone of real-world web development today. And as user demands evolve, applications need to be more performant.
-
-This week, you’ll take starter code with a fully functioning Google Books API search engine built with a RESTful API, and refactor it to be a GraphQL API built with Apollo Server. The app was built using the MERN stack with a React front end, MongoDB database, and Node.js/Express.js server and API. It's already set up to allow users to save book searches to the back end. 
-
-To complete the assignment, you’ll need to do the following:
-
-1. Set up an Apollo Server to use GraphQL queries and mutations to fetch and modify data, replacing the existing RESTful API.
-
-2. Modify the existing authentication middleware so that it works in the context of a GraphQL API.
-
-3. Create an Apollo Provider so that requests can communicate with an Apollo Server.
-
-4. Deploy your application to Heroku with a MongoDB database using MongoDB Atlas. Use the [Deploy with Heroku and MongoDB Atlas](https://coding-boot-camp.github.io/full-stack/mongodb/deploy-with-heroku-and-mongodb-atlas) walkthrough for instructions.
+## Deployable Link
 
 
-## User Story
+## Goal
+The task was to build a book search engine capable of login/logout/signup functionality as well as the ability to search a book, add a book to a list and have the user be able to delete the saved book. The entire functionality of the website heavily relied on MERN, MongoDB, Express, REACT, Node, as well as utilize GraphQL API. 
 
-```md
-AS AN avid reader
-I WANT to search for new books to read
-SO THAT I can keep a list of books to purchase
+## Technology Use
+  - Javascript
+  - MongoDB
+  - REACT
+  - Express.js
+  - Node.js
+  - GraphQL API
+  - VS Code
+  - Git Bash 
+  - GitHub
+
+## Execution
+Since there was starter code given, the first step was to figure which files needed to be modified and which files needed to be created. Since most web applications need a server js to function, the first task to tackle was to make the server server.js file compatible with the MERN system. That seemed like the least laborious task considering that all that was needed was to update some middleware and connect to apollo servers. The code for that file is shown below:
+
+AboutMe.js code:
+```Javascript
+const express = require('express');
+const { ApolloServer } = require('apollo-server-express');
+const path = require('path');
+const {authMiddleware} = require('./utils/auth')
+
+const { typeDefs, resolvers } = require('./schemas');
+const db = require('./config/connection');
+
+const app = express();
+const PORT = process.env.PORT || 3001;
+const server = new ApolloServer({
+  typeDefs,
+  resolvers,
+  context: authMiddleware
+});
+
+app.use(express.urlencoded({ extended: true }));
+app.use(express.json());
+
+// if we're in production, serve client/build as static assets
+if (process.env.NODE_ENV === 'production') {
+  app.use(express.static(path.join(__dirname, '../client/build')));
+}
+
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, '../client/build/index.html'));
+});
+
+const startApolloServer = async (typeDefs, resolvers) => {
+  await server.start();
+  server.applyMiddleware({ app });
+  
+  db.once('open', () => {
+    app.listen(PORT, () => {
+      console.log(`API server running on port ${PORT}!`);
+      console.log(`Use GraphQL at http://localhost:${PORT}${server.graphqlPath}`);
+    })
+  })
+  };
+  
+
+  startApolloServer(typeDefs, resolvers);
+```
+After setting up the server.js file, there needed to be resolvers and typeDefs. These two js files were key to make the website MERN capable considering that the MERN system relies on resolvers and and typeDefs. So an entire schemas folder was created just to allow the application to pull from the resolver.js and typeDefs.js files. Naturally there needed to be an index.js file to glue everything in the schema folder together. The code for all three of these files is shown below:
+
+index.js code:
+```Javascript
+const typeDefs = require('./typeDefs');
+const resolvers = require('./resolvers');
+
+module.exports = { typeDefs, resolvers };
 ```
 
 
-## Acceptance Criteria
+resolvers.js code:
+```Javascript
+const { AuthenticationError } = require('apollo-server-express');
+const { User, Book } = require('../models');
+const { signToken } = require('../utils/auth');
 
-```md
-GIVEN a book search engine
-WHEN I load the search engine
-THEN I am presented with a menu with the options Search for Books and Login/Signup and an input field to search for books and a submit button
+const resolvers = {
+  Query: {
+    users: async () => {
+      return User.find().populate('books');
+    },
+    user: async (parent, { username }) => {
+      return User.findOne({ username }).populate('books');
+    },
+    books: async (parent, { username }) => {
+      const params = username ? { username } : {};
+      return Book.find(params).sort({ bookId: -1 });
+    },
+    books: async (parent, { bookId }) => {
+      return Book.findOne({ _id: bookId });
+    },
+    me: async (parent, args, context) => {
+      if (context.user) {
+        return User.findOne({ _id: context.user._id }).populate('books');
+      }
+      throw new AuthenticationError('You need to be logged in!');
+    },
+  },
 
-WHEN I click on the Search for Books menu option
-THEN I am presented with an input field to search for books and a submit button
+  Mutation: {
+    addUser: async (parent, { username, email, password }) => {
+      console.log(username)
+      console.log(email)
+      console.log(password)
+      const user = await User.create({ username, email, password });
+      console.log(user)
+      const token = signToken(user);
+      console.log(token)
+      return { token, user };
+    },
+    login: async (parent, { email, password }) => {
+      const user = await User.findOne({ email });
 
-WHEN I am not logged in and enter a search term in the input field and click the submit button
-THEN I am presented with several search results, each featuring a book’s title, author, description, image, and a link to that book on the Google Books site
+      if (!user) {
+        throw new AuthenticationError('No user found with this email address');
+      }
 
-WHEN I click on the Login/Signup menu option
-THEN a modal appears on the screen with a toggle between the option to log in or sign up
+      const correctPw = await user.isCorrectPassword(password);
 
-WHEN the toggle is set to Signup
-THEN I am presented with three inputs for a username, an email address, and a password, and a signup button
+      if (!correctPw) {
+        throw new AuthenticationError('Incorrect credentials');
+      }
 
-WHEN the toggle is set to Login
-THEN I am presented with two inputs for an email address and a password and login button
+      const token = signToken(user);
 
-WHEN I enter a valid email address and create a password and click on the signup button
-THEN my user account is created and I am logged in to the site
+      return { token, user };
+    },
+    saveBook: async (parent, args, context) => {
+      try {
+        const updatedUser = await User.findOneAndUpdate(
+          { _id: context.user._id },
+          { $addToSet: { savedBooks: args.input } },
+          { new: true, runValidators: true }
+        );
+        return (updatedUser);
+      } catch (err) {
+        console.log(err);
+        throw new AuthenticationError('Incorrect stuff');
+      }
+},
+removeBook: async (parent, args, context) =>  {
+  const updatedUser = await User.findOneAndUpdate(
+    { _id: context.user._id },
+    { $pull: { savedBooks: { bookId: args.bookId } } },
+    { new: true }
+  );
+  if (!updatedUser) {
+    throw new AuthenticationError('Incorrect stuff')
+  }
+  return (updatedUser);
+},
+},
 
-WHEN I enter my account’s email address and password and click on the login button
-THEN I the modal closes and I am logged in to the site
+};
 
-WHEN I am logged in to the site
-THEN the menu options change to Search for Books, an option to see my saved books, and Logout
-
-WHEN I am logged in and enter a search term in the input field and click the submit button
-THEN I am presented with several search results, each featuring a book’s title, author, description, image, and a link to that book on the Google Books site and a button to save a book to my account
-
-WHEN I click on the Save button on a book
-THEN that book’s information is saved to my account
-
-WHEN I click on the option to see my saved books
-THEN I am presented with all of the books I have saved to my account, each featuring the book’s title, author, description, image, and a link to that book on the Google Books site and a button to remove a book from my account
-
-WHEN I click on the Remove button on a book
-THEN that book is deleted from my saved books list
-
-WHEN I click on the Logout button
-THEN I am logged out of the site and presented with a menu with the options Search for Books and Login/Signup and an input field to search for books and a submit button  
+module.exports = resolvers
 ```
 
 
-## Mock-Up
+typeDefs.js code:
+```Javascript
+const { gql } = require('apollo-server-express');
+
+const typeDefs = gql`
+  type User {
+    _id: ID
+    username: String
+    email: String
+    password: String
+    savedBooks: [Book]
+  }
+
+  type Book {
+    _id: ID
+    authors: [String]
+    description: String
+    bookId: String
+    image: String
+    link: String
+    title: String
+  }
+  input BookInput {
+    authors: [String]
+    description: String
+    bookId: String
+    image: String
+    link: String
+    title: String
+  }
+  type Auth {
+    token: ID!
+    user: User
+  }
+
+  type Query {
+    users: [User]
+    user(username: String!): User
+    books(username: String): [Book]
+    book(bookId: ID!): Book
+    me: User
+  }
+
+  type Mutation {
+    addUser(username: String!, email: String!, password: String!): Auth
+    login(email: String!, password: String!): Auth
+    saveBook(input: BookInput): User
+    removeBook(bookId: String!): User
+  }
+`;
+
+module.exports = typeDefs;
+```
+After fixing the files that controlled the backende in the server folder, the nex task was to implement useQuery hooks, useMutation hooks, queries, and mutations. Just like the schema folder in the server folder, both mutation.js and queries.js were created within the utils folder in the client folder in order to make queries and mutations. These are necessary for the front end to work because both control login, logout, signup, add book, delete book, and add user. The code for both codes is shown below: 
+
+mutations.js code:
+```Javascript
+import {gql} from "@apollo/client"
+export const LOGIN_USER = gql`
+mutation Mutation($email: String!, $password: String!) {
+    login(email: $email, password: $password) {
+      token
+      user {
+        _id
+        email
+        username
+        savedBooks {
+          _id
+          authors
+          description
+          bookId
+          image
+          link
+          title
+        }
+      }
+    }
+  }
+`
+export const ADD_USER = gql`
+mutation AddUser($username: String!, $email: String!, $password: String!) {
+    addUser(username: $username, email: $email, password: $password) {
+      token
+      user {
+        _id
+        username
+        email
+        savedBooks {
+          _id
+          authors
+          description
+          bookId
+          image
+          link
+          title
+        }
+      }
+    }
+  }
+`
+export const SAVE_BOOK = gql`
+mutation Mutation($input: BookInput) {
+    saveBook(input: $input) {
+      _id
+      username
+      email
+      savedBooks {
+        _id
+        authors
+        description
+        bookId
+        image
+        link
+        title
+      }
+    }
+  }
+`
+export const REMOVE_BOOK = gql`
+mutation RemoveBook($bookId: String!) {
+    removeBook(bookId: $bookId) {
+      _id
+      username
+      email
+      savedBooks {
+        _id
+        authors
+        description
+        bookId
+        image
+        link
+        title
+      }
+    }
+  }
+`
+
+```
+
+
+queries.js code:
+```Javascript
+import {gql} from "@apollo/client"
+export const GET_ME = gql`
+query Query {
+    me {
+      _id
+      email
+      savedBooks {
+        _id
+        authors
+        bookId
+        description
+        image
+        link
+        title
+      }
+      username
+    }
+  }
+`
+```
+
+
+After inputting the following javascript files, the next step was to connect it to LoginForm.js, SignupForm.js, SavedBook.js, and SearchBooks.js files using useMutation and useQuery hooks. 
+
+The following code is shown below.
+
+SearchBooks.js code:
+```Javascript
+import React, { useState, useEffect } from 'react';
+import { Jumbotron, Container, Col, Form, Button, Card, CardColumns } from 'react-bootstrap';
+
+import Auth from '../utils/auth';
+import {  searchGoogleBooks } from '../utils/API';
+import { saveBookIds, getSavedBookIds } from '../utils/localStorage';
+import {useMutation} from '@apollo/client'
+import { SAVE_BOOK } from '../utils/mutations';
+const SearchBooks = () => {
+  // create state for holding returned google api data
+  const [searchedBooks, setSearchedBooks] = useState([]);
+  // create state for holding our search field data
+  const [searchInput, setSearchInput] = useState('');
+
+  // create state to hold saved bookId values
+  const [savedBookIds, setSavedBookIds] = useState(getSavedBookIds());
+const [saveBook] = useMutation(SAVE_BOOK)
+  // set up useEffect hook to save `savedBookIds` list to localStorage on component unmount
+  // learn more here: https://reactjs.org/docs/hooks-effect.html#effects-with-cleanup
+  useEffect(() => {
+    return () => saveBookIds(savedBookIds);
+  });
+
+  // create method to search for books and set state on form submit
+  const handleFormSubmit = async (event) => {
+    event.preventDefault();
+
+    if (!searchInput) {
+      return false;
+    }
+
+    try {
+      const response = await searchGoogleBooks(searchInput);
+
+      if (!response.ok) {
+        throw new Error('something went wrong!');
+      }
+
+      const { items } = await response.json();
+
+      const bookData = items.map((book) => ({
+        bookId: book.id,
+        authors: book.volumeInfo.authors || ['No author to display'],
+        title: book.volumeInfo.title,
+        description: book.volumeInfo.description,
+        image: book.volumeInfo.imageLinks?.thumbnail || '',
+      }));
+
+      setSearchedBooks(bookData);
+      setSearchInput('');
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  // create function to handle saving a book to our database
+  const handleSaveBook = async (bookId) => {
+    // find the book in `searchedBooks` state by the matching id
+    const bookToSave = searchedBooks.find((book) => book.bookId === bookId);
+
+    // get token
+    const token = Auth.loggedIn() ? Auth.getToken() : null;
+
+    if (!token) {
+      return false;
+    }
+
+    try {
+      // const response = await saveBook(bookToSave, token);
+      console.log(bookToSave)
+const response = await saveBook({
+  variables: {
+    "input": {
+    "authors": bookToSave.authors,
+    "bookId": bookToSave.bookId,
+    "image": bookToSave.image,
+    "description": bookToSave.description,
+    "link": bookToSave.link,
+    "title": bookToSave.title
+  }}
+})
+console.log(response.data)
+      // if book successfully saves to user's account, save book id to state
+      setSavedBookIds([...savedBookIds, bookToSave.bookId]);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  return (
+    <>
+      <Jumbotron fluid className='text-light bg-dark'>
+        <Container>
+          <h1>Search for Books!</h1>
+          <Form onSubmit={handleFormSubmit}>
+            <Form.Row>
+              <Col xs={12} md={8}>
+                <Form.Control
+                  name='searchInput'
+                  value={searchInput}
+                  onChange={(e) => setSearchInput(e.target.value)}
+                  type='text'
+                  size='lg'
+                  placeholder='Search for a book'
+                />
+              </Col>
+              <Col xs={12} md={4}>
+                <Button type='submit' variant='success' size='lg'>
+                  Submit Search
+                </Button>
+              </Col>
+            </Form.Row>
+          </Form>
+        </Container>
+      </Jumbotron>
+
+      <Container>
+        <h2>
+          {searchedBooks.length
+            ? `Viewing ${searchedBooks.length} results:`
+            : 'Search for a book to begin'}
+        </h2>
+        <CardColumns>
+          {searchedBooks.map((book) => {
+            return (
+              <Card key={book.bookId} border='dark'>
+                {book.image ? (
+                  <Card.Img src={book.image} alt={`The cover for ${book.title}`} variant='top' />
+                ) : null}
+                <Card.Body>
+                  <Card.Title>{book.title}</Card.Title>
+                  <p className='small'>Authors: {book.authors}</p>
+                  <Card.Text>{book.description}</Card.Text>
+                  {Auth.loggedIn() && (
+                    <Button
+                      disabled={savedBookIds?.some((savedBookId) => savedBookId === book.bookId)}
+                      className='btn-block btn-info'
+                      onClick={() => handleSaveBook(book.bookId)}>
+                      {savedBookIds?.some((savedBookId) => savedBookId === book.bookId)
+                        ? 'This book has already been saved!'
+                        : 'Save this Book!'}
+                    </Button>
+                  )}
+                </Card.Body>
+              </Card>
+            );
+          })}
+        </CardColumns>
+      </Container>
+    </>
+  );
+};
+
+export default SearchBooks;
+
+
+
+```
+
+
+SaveBooks.js code:
+```Javascript
+import React, { useState, useEffect } from 'react';
+import { Jumbotron, Container, CardColumns, Card, Button } from 'react-bootstrap';
+
+import { getMe, deleteBook } from '../utils/API';
+import Auth from '../utils/auth';
+import { removeBookId } from '../utils/localStorage';
+import { GET_ME } from '../utils/queries';
+import {useMutation} from '@apollo/client'
+import { useQuery } from '@apollo/client';
+import { REMOVE_BOOK } from '../utils/mutations';
+const SavedBooks = () => {
+  
+  // use this to determine if `useEffect()` hook needs to run again
+  
+  const [removeBook] = useMutation(REMOVE_BOOK)
+  const { loading, data } = useQuery(GET_ME)
+  const userData = data?.me || {};
+
+
+  // create function that accepts the book's mongo _id value as param and deletes the book from the database
+  const handleDeleteBook = async (bookId) => {
+    const token = Auth.loggedIn() ? Auth.getToken() : null;
+
+    if (!token) {
+      return false;
+    }
+
+    try {
+      const response = await removeBook({
+        variables: {
+          "bookId": bookId
+
+        }
+      });
+
+      if (!response.data) {
+        throw new Error('something went wrong!');
+      }
+
+      
+      // upon success, remove book's id from localStorage
+      removeBookId(bookId);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  // if data isn't here yet, say so
+  if (loading) {
+    return <h2>LOADING...</h2>;
+  }
+
+  return (
+    <>
+      <Jumbotron fluid className='text-light bg-dark'>
+        <Container>
+          <h1>Viewing saved books!</h1>
+        </Container>
+      </Jumbotron>
+      <Container>
+        <h2>
+          {userData.savedBooks.length
+            ? `Viewing ${userData.savedBooks.length} saved ${userData.savedBooks.length === 1 ? 'book' : 'books'}:`
+            : 'You have no saved books!'}
+        </h2>
+        <CardColumns>
+          {userData.savedBooks.map((book) => {
+            return (
+              <Card key={book.bookId} border='dark'>
+                {book.image ? <Card.Img src={book.image} alt={`The cover for ${book.title}`} variant='top' /> : null}
+                <Card.Body>
+                  <Card.Title>{book.title}</Card.Title>
+                  <p className='small'>Authors: {book.authors}</p>
+                  <Card.Text>{book.description}</Card.Text>
+                  <Button className='btn-block btn-danger' onClick={() => handleDeleteBook(book.bookId)}>
+                    Delete this Book!
+                  </Button>
+                </Card.Body>
+              </Card>
+            );
+          })}
+        </CardColumns>
+      </Container>
+    </>
+  );
+};
+
+export default SavedBooks;
+
+
+
+```
+
+
+LoginForm.js code:
+```Javascript
+// see SignupForm.js for comments
+import React, { useState } from 'react';
+import { Form, Button, Alert } from 'react-bootstrap';
+import { useMutation } from '@apollo/client';
+import { LOGIN_USER } from '../utils/mutations';
+import Auth from '../utils/auth';
+
+const LoginForm = () => {
+  const [userFormData, setUserFormData] = useState({ email: '', password: '' });
+  const [validated] = useState(false);
+  const [showAlert, setShowAlert] = useState(false);
+  const [loginUser] = useMutation(LOGIN_USER)
+
+  const handleInputChange = (event) => {
+    const { name, value } = event.target;
+    setUserFormData({ ...userFormData, [name]: value });
+  };
+
+  const handleFormSubmit = async (event) => {
+    event.preventDefault();
+
+    // check if form has everything (as per react-bootstrap docs)
+    const form = event.currentTarget;
+    if (form.checkValidity() === false) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+
+    try {
+      const response = await loginUser({variables: {...userFormData}})
+
+      if (!response.data) {
+        throw new Error('something went wrong!');
+      }
+
+      const { token, user } = response.data.login;
+      console.log(user);
+      Auth.login(token);
+    } catch (err) {
+      console.error(err);
+      setShowAlert(true);
+    }
+
+    setUserFormData({
+      username: '',
+      email: '',
+      password: '',
+    });
+  };
+
+  return (
+    <>
+      <Form noValidate validated={validated} onSubmit={handleFormSubmit}>
+        <Alert dismissible onClose={() => setShowAlert(false)} show={showAlert} variant='danger'>
+          Something went wrong with your login credentials!
+        </Alert>
+        <Form.Group>
+          <Form.Label htmlFor='email'>Email</Form.Label>
+          <Form.Control
+            type='text'
+            placeholder='Your email'
+            name='email'
+            onChange={handleInputChange}
+            value={userFormData.email}
+            required
+          />
+          <Form.Control.Feedback type='invalid'>Email is required!</Form.Control.Feedback>
+        </Form.Group>
+
+        <Form.Group>
+          <Form.Label htmlFor='password'>Password</Form.Label>
+          <Form.Control
+            type='password'
+            placeholder='Your password'
+            name='password'
+            onChange={handleInputChange}
+            value={userFormData.password}
+            required
+          />
+          <Form.Control.Feedback type='invalid'>Password is required!</Form.Control.Feedback>
+        </Form.Group>
+        <Button
+          disabled={!(userFormData.email && userFormData.password)}
+          type='submit'
+          variant='success'>
+          Submit
+        </Button>
+      </Form>
+    </>
+  );
+};
+
+export default LoginForm;
+
+
+```
+SignupForm.js code:
+```Javascript
+import React, { useState } from 'react';
+import { Form, Button, Alert } from 'react-bootstrap';
+
+import { useMutation } from '@apollo/client';
+import { ADD_USER } from '../utils/mutations';
+import Auth from '../utils/auth';
+
+const SignupForm = () => {
+  // set initial form state
+  const [userFormData, setUserFormData] = useState({ username: '', email: '', password: '' });
+  // set state for form validation
+  const [validated] = useState(false);
+  // set state for alert
+  const [showAlert, setShowAlert] = useState(false);
+const [addUser] = useMutation(ADD_USER)
+
+  const handleInputChange = (event) => {
+    const { name, value } = event.target;
+    setUserFormData({ ...userFormData, [name]: value });
+  };
+
+  const handleFormSubmit = async (event) => {
+    event.preventDefault();
+
+    // check if form has everything (as per react-bootstrap docs)
+    const form = event.currentTarget;
+    if (form.checkValidity() === false) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+
+    try {
+      const response = await addUser({variables: {...userFormData}});
+      console.log(response)
+      if (!response.data) {
+        throw new Error('something went wrong!');
+      }
+
+      const { token, user } = response.data.addUser;
+      console.log(user);
+      Auth.login(token);
+    } catch (err) {
+      console.error(err);
+      setShowAlert(true);
+    }
+
+    setUserFormData({
+      username: '',
+      email: '',
+      password: '',
+    });
+  };
+
+  return (
+    <>
+      {/* This is needed for the validation functionality above */}
+      <Form noValidate validated={validated} onSubmit={handleFormSubmit}>
+        {/* show alert if server response is bad */}
+        <Alert dismissible onClose={() => setShowAlert(false)} show={showAlert} variant='danger'>
+          Something went wrong with your signup!
+        </Alert>
+
+        <Form.Group>
+          <Form.Label htmlFor='username'>Username</Form.Label>
+          <Form.Control
+            type='text'
+            placeholder='Your username'
+            name='username'
+            onChange={handleInputChange}
+            value={userFormData.username}
+            required
+          />
+          <Form.Control.Feedback type='invalid'>Username is required!</Form.Control.Feedback>
+        </Form.Group>
+
+        <Form.Group>
+          <Form.Label htmlFor='email'>Email</Form.Label>
+          <Form.Control
+            type='email'
+            placeholder='Your email address'
+            name='email'
+            onChange={handleInputChange}
+            value={userFormData.email}
+            required
+          />
+          <Form.Control.Feedback type='invalid'>Email is required!</Form.Control.Feedback>
+        </Form.Group>
+
+        <Form.Group>
+          <Form.Label htmlFor='password'>Password</Form.Label>
+          <Form.Control
+            type='password'
+            placeholder='Your password'
+            name='password'
+            onChange={handleInputChange}
+            value={userFormData.password}
+            required
+          />
+          <Form.Control.Feedback type='invalid'>Password is required!</Form.Control.Feedback>
+        </Form.Group>
+        <Button
+          disabled={!(userFormData.username && userFormData.email && userFormData.password)}
+          type='submit'
+          variant='success'>
+          Submit
+        </Button>
+      </Form>
+    </>
+  );
+};
+
+export default SignupForm;
+
+
+
+```
+Once all the codes were created, App.css was used to style the website.
+
+## Result
+
+The following website demonstrates what the final product looks like:
+
+![](2022-12-08-01-16-07.png)
 
-Let's start by revisiting the web application's appearance and functionality.
-
-As you can see in the following animation, a user can type a search term (in this case, "star wars") in a search box and the results appear:
-
-![Animation shows "star wars" typed into a search box and books about Star Wars appearing as results.](./Assets/21-mern-challenge-demo-01.gif)
-
-The user can save books by clicking "Save This Book!" under each search result, as shown in the following animation:
-
-![Animation shows user clicking "Save This Book!" button to save books that appear in search results. The button label changes to "Book Already Saved" after it is clicked and the book is saved.](./Assets/21-mern-challenge-demo-02.gif)
-
-A user can view their saved books on a separate page, as shown in the following animation:
-
-![The Viewing Lernantino's Books page shows the books that the user Lernaninto has saved.](./Assets/21-mern-challenge-demo-03.gif)
-
-
-## Getting Started
-
-In order for this application to use a GraphQL API, you’ll need to refactor the API to use GraphQL on the back end and add some functionality to the front end. The following sections contain details about the files you’ll need to modify on the back end and the front end.
-
-**Important**: Make sure to study the application before building upon it. Better yet, start by making a copy of it. It's already a working application&mdash;you're converting it from RESTful API practices to a GraphQL API.
-
-### Back-End Specifications
-
-You’ll need to complete the following tasks in each of these back-end files:
-
-* `server.js`: Implement the Apollo Server and apply it to the Express server as middleware.
-
-* `auth.js`: Update the auth middleware function to work with the GraphQL API.
-
-	**Hint**: Refer to the class activities as a refresher on how to do this.
-
-* `Schemas` directory:
-
-	* `index.js`: Export your typeDefs and resolvers.
-
-	* `resolvers.js`: Define the query and mutation functionality to work with the Mongoose models.
-
-		**Hint**: Use the functionality in the `user-controller.js` as a guide.
-
-	* `typeDefs.js`: Define the necessary `Query` and `Mutation` types:
-
-		* `Query` type:
-
-			* `me`: Which returns a `User` type.
-		
-		* `Mutation` type:
-
-			* `login`: Accepts an email and password as parameters; returns an `Auth` type.
-
-			* `addUser`: Accepts a username, email, and password as parameters; returns an `Auth` type.
-
-			* `saveBook`: Accepts a book author's array, description, title, bookId, image, and link as parameters; returns a `User` type. (Look into creating what's known as an `input` type to handle all of these parameters!)
-
-			* `removeBook`: Accepts a book's `bookId` as a parameter; returns a `User` type.
-			
-		* `User` type:
-
-			* `_id`
-
-			* `username`
-
-			* `email`
-
-			* `bookCount`
-
-			* `savedBooks` (This will be an array of the `Book` type.)
-
-		* `Book` type:
-
-			* `bookId` (Not the `_id`, but the book's `id` value returned from Google's Book API.)
-
-			* `authors` (An array of strings, as there may be more than one author.)
-
-			* `description`
-
-			* `title`
-
-			* `image`
-
-			* `link`
-
-		* `Auth` type:
-
-			* `token`
-
-			* `user` (References the `User` type.)
-
-
-### Front-End Specifications
-
-You'll need to create the following front-end files:
-
-* `queries.js`: This will hold the query `GET_ME`, which will execute the `me` query set up using Apollo Server.
-
-* `mutations.js`:
-
-	* `LOGIN_USER` will execute the `loginUser` mutation set up using Apollo Server.
-
-	* `ADD_USER` will execute the `addUser` mutation.
-
-	* `SAVE_BOOK` will execute the `saveBook` mutation.
-
-	* `REMOVE_BOOK` will execute the `removeBook` mutation.
-
-Additionally, you’ll need to complete the following tasks in each of these front-end files:
-
-* `App.js`: Create an Apollo Provider to make every request work with the Apollo Server.
-	
-* `SearchBooks.js`:
-
-	* Use the Apollo `useMutation()` Hook to execute the `SAVE_BOOK` mutation in the `handleSaveBook()` function instead of the `saveBook()` function imported from the `API` file.
-
-	* Make sure you keep the logic for saving the book's ID to state in the `try...catch` block! 
-
-* `SavedBooks.js`:
-
-	* Remove the `useEffect()` Hook that sets the state for `UserData`.
-
-	* Instead, use the `useQuery()` Hook to execute the `GET_ME` query on load and save it to a variable named `userData`.
-
-	* Use the `useMutation()` Hook to execute the `REMOVE_BOOK` mutation in the `handleDeleteBook()` function instead of the `deleteBook()` function that's imported from `API` file. (Make sure you keep the `removeBookId()` function in place!)
-
-* `SignupForm.js`: Replace the `addUser()` functionality imported from the `API` file with the `ADD_USER` mutation functionality.
-
-* `LoginForm.js`: Replace the `loginUser()` functionality imported from the `API` file with the `LOGIN_USER` mutation functionality.
-
-
-## Grading Requirements
-
-This challenge is graded based on the following criteria:
-
-### Technical Acceptance Criteria: 40%
-
-* Satisfies all of the preceding acceptance criteria plus the following:
-
-	* Has an Apollo Server that uses GraphQL queries and mutations to fetch and modify data, replacing the existing RESTful API.
-
-	* Use an Apollo Server and apply it to the Express.js server as middleware.
-
-	* Include schema settings for resolvers and typeDefs as outlined in the challenge instructions.
-
-	* Modify the existing authentication middleware to work in the context of a GraphQL API.
-
-	* Use an Apollo Provider so that the application can communicate with the Apollo Server.
-
-	* Application must be deployed to Heroku.
-
-
-### Deployment: 32%
-
-* Application deployed at live URL.
-
-* Application loads with no errors.
-
-* Application GitHub URL submitted.
-
-* GitHub repository contains application code.
-
-
-### Application Quality: 15%
-
-* User experience is intuitive and easy to navigate.
-
-* User interface style is clean and polished.
-
-* Application resembles the mock-up functionality provided in the challenge instructions.
-
-
-### Repository Quality: 13%
-
-* Repository has a unique name.
-
-* Repository follows best practices for file structure and naming conventions.
-
-* Repository follows best practices for class/id naming conventions, indentation, quality comments, etc.
-
-* Repository contains multiple descriptive commit messages.
-
-* Repository contains high-quality README file with description, screenshot, and link to the deployed application.
-
-
-## Review
-
-You are required to submit BOTH of the following for review:
-
-* The URL of the functional, deployed application.
-
-* The URL of the GitHub repository. Give the repository a unique name and include a README describing the project.
-
----
-© 2021 Trilogy Education Services, LLC, a 2U, Inc. brand. Confidential and Proprietary. All Rights Reserved.
